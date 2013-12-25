@@ -64,7 +64,6 @@ class SteamClient
         body[:captchagid] = resp["captcha_gid"]
         body[:captcha_text] = STDIN.gets.chomp
       end
-      # TODO ensure captcha is handled correctly.
 
       if resp["emailauth_needed"]
         puts "Please enter your steamguard code"
@@ -85,11 +84,10 @@ class SteamClient
   end
 end
 
-sm = SteamClient.new 
-puts "Enter username:"
-username = STDIN.gets.chomp
-puts "Enter password:"
-password = STDIN.gets.chomp
+sm = SteamClient.new
+conf = JSON.parse(open("./config.json").read)
+username = conf["username"]
+password = conf["password"]
 if sm.login(username, password)
   puts "Logged in"
 else
