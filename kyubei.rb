@@ -40,11 +40,14 @@ class SteamClient
     end
   end
 
+  def logged_in?
+    loginpage = @c.get("https://steamcommunity.com/login/checkstoredlogin?redirectURL=%2F")
+    loginpage.headers["Set-Cookie"] =~ /^steamLogin=(?!deleted)/
+  end
 
   def login(username, password)
     # Check if we need to login. might already have the cookie
-    loginpage = @c.get("https://steamcommunity.com/login/checkstoredlogin?redirectURL=%2F")
-    return true if loginpage.headers["Set-Cookie"] =~ /^steamLogin=(?!deleted)/
+    return true if logged_in?
 
     count = 0
     resp = {
@@ -139,10 +142,7 @@ class SteamClient
       fee: listing[:fee_amount],
       total: listing[:price]
     }
-    @c.debug_dev = STDOUT
     res = @c.post("https://steamcommunity.com/market/buylisting/" + id, body, {Referer: listing[:page_url], Origin: "http://steamcommunity.com"})
-    @c.debug_dev = nil
-    p res
     if res.code == 200
       jsres = JSON.parse(res.body)
       if jsres["wallet_info"]["success"] == 1
@@ -151,6 +151,8 @@ class SteamClient
       end
     end
     puts JSON.parse(res.body)["message"] rescue
+    # See if we need to relog. Any unrecoverable mistakes pretty-much
+    exit if JSON.parse(res.body)["message"] =~ "^Cookies" rescue
     false
   end
 
