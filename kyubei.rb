@@ -1,20 +1,50 @@
 require 'httpclient'
 require 'json'
 require 'base64'
+require 'nokogiri'
 require 'open-uri'
 require 'v8'
 
+class HTTPClient
+  # This is the default_redirect_uri_callback with the https check commented out
+  def weak_redirect_uri_callback(uri, res)
+    newuri = urify(res.header['location'][0])
+    if !http?(newuri) && !https?(newuri)
+      newuri = uri + newuri
+      warn("could be a relative URI in location header which is not recommended")
+      warn("'The field value consists of a single absolute URI' in HTTP spec")
+    end
+    #if https?(uri) && !https?(newuri)
+    #  raise BadResponseError.new("redirecting to non-https resource")
+    #end
+    puts "redirect to: #{newuri}" if $DEBUG
+    newuri
+  end
+end
+
 class SteamClient
+  attr_reader :wallet_balance
   def initialize
-    @c = HTTPClient.new
+    @c = HTTPClient.new({agent_name: "kyubeiclient/1.0 (X11; Linux x86_64)"})
     @c.set_cookie_store('./cookie.jar')
+    @c.redirect_uri_callback=@c.method(:weak_redirect_uri_callback)
     @wallet_balance = nil
   end
 
+  def fetch_wallet_balance
+    page = Nokogiri::HTML(@c.get_content("https://steamcommunity.com/market/"))
+    begin
+      @wallet_balance = (page.css("#marketWalletBalanceAmount").text.gsub(/[^\.\d]/,'').to_f * 100).to_i
+    rescue
+      raise "Must login before getting balance"
+    end
+  end
+
+
   def login(username, password)
     # Check if we need to login. might already have the cookie
-    loginpage = @c.get("https://steamcommunity.com/actions/RedirectToHome")
-    return true if loginpage.headers["Location"] =~ /^https?:\/\/steamcommunity.com\/.*\/home$/
+    loginpage = @c.get("https://steamcommunity.com/login/checkstoredlogin?redirectURL=%2F")
+    return true if loginpage.headers["Set-Cookie"] =~ /^steamLogin=(?!deleted)/
 
     count = 0
     resp = {
@@ -83,6 +113,8 @@ class SteamClient
     resp["success"]
   end
 
+  # Url should look like:
+  # http://steamcommunity.com/market/listings/xxx/yyyy-item-name
   def market_listings_for(item_url)
     render_url = item_url.sub(/\/$/,'') + '/render/?query=&start=0&count=10'
     listings = JSON.parse(@c.get_content(render_url))
@@ -91,21 +123,25 @@ class SteamClient
         id: listing["listingid"],
         price: listing["converted_price"] + listing["converted_fee"],
         base_amount: listing["converted_price"],
-        fee_amount: listing["converted_fee"]
+        fee_amount: listing["converted_fee"],
+        page_url: item_url
       }
     end
   end
 
   def market_buy(listing)
     id = listing[:id]
+    sessionid = URI.decode(@c.cookie_manager.cookies.select{|i| i.match?(URI("https://steamcommunity.com")) && i.name == "sessionid"}.first.value)
     body = {
-      sessionid: @c.cookie_manager.cookies.select{|i| i.match?(URI("https://steamcommunity.com")) && i.name == "sessionid"}.first.value,
+      sessionid: sessionid,
       currency: 1,
       subtotal: listing[:base_amount],
       fee: listing[:fee_amount],
       total: listing[:price]
     }
-    res = @c.post("https://steamcommunity.com/market/buylisting/" + id, body)
+    @c.debug_dev = STDOUT
+    res = @c.post("https://steamcommunity.com/market/buylisting/" + id, body, {Referer: listing[:page_url], Origin: "http://steamcommunity.com"})
+    @c.debug_dev = nil
     p res
     if res.code == 200
       jsres = JSON.parse(res.body)
@@ -114,9 +150,22 @@ class SteamClient
         return true
       end
     end
+    puts JSON.parse(res.body)["message"] rescue
     false
   end
 
+  # Price in cents
+  def market_buy_if_less_than(item_url, price)
+    listings = market_listings_for item_url
+    listings = listings.sort{|i,j| i[:price] - j[:price]}
+    # Pick random cheapest to reduce contention
+    cheapest = listings.reject{|i| i[:price] > listings.first[:price]}.sample
+    if cheapest[:price] < price
+      market_buy cheapest
+    else
+      false
+    end
+  end
 end
 
 sm = SteamClient.new
@@ -124,7 +173,9 @@ conf = JSON.parse(open("./config.json").read)
 username = conf["username"]
 password = conf["password"]
 if sm.login(username, password)
+  sm.fetch_wallet_balance
   puts "Logged in"
+  puts "Your wallet has: $#{sm.wallet_balance/100.0}"
 else
   puts "Failure"
 end
