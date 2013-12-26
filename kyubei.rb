@@ -8,13 +8,13 @@ class SteamClient
   def initialize
     @c = HTTPClient.new
     @c.set_cookie_store('./cookie.jar')
+    @wallet_balance = nil
   end
 
   def login(username, password)
-
     # Check if we need to login. might already have the cookie
-    loginpage = @c.get("https://steamcommunity.com/login/home/")
-    return true if loginpage.headers["Location"] # attempting to redirect us home
+    loginpage = @c.get("https://steamcommunity.com/actions/RedirectToHome")
+    return true if loginpage.headers["Location"] =~ /^https?:\/\/steamcommunity.com\/.*\/home$/
 
     count = 0
     resp = {
@@ -82,6 +82,41 @@ class SteamClient
     @c.save_cookie_store
     resp["success"]
   end
+
+  def market_listings_for(item_url)
+    render_url = item_url.sub(/\/$/,'') + '/render/?query=&start=0&count=10'
+    listings = JSON.parse(@c.get_content(render_url))
+    listings["listinginfo"].map(&:last).map do |listing|
+      {
+        id: listing["listingid"],
+        price: listing["converted_price"] + listing["converted_fee"],
+        base_amount: listing["converted_price"],
+        fee_amount: listing["converted_fee"]
+      }
+    end
+  end
+
+  def market_buy(listing)
+    id = listing[:id]
+    body = {
+      sessionid: @c.cookie_manager.cookies.select{|i| i.match?(URI("https://steamcommunity.com")) && i.name == "sessionid"}.first.value,
+      currency: 1,
+      subtotal: listing[:base_amount],
+      fee: listing[:fee_amount],
+      total: listing[:price]
+    }
+    res = @c.post("https://steamcommunity.com/market/buylisting/" + id, body)
+    p res
+    if res.code == 200
+      jsres = JSON.parse(res.body)
+      if jsres["wallet_info"]["success"] == 1
+        @wallet_balance = jsres["wallet_info"]["wallet_balance"]
+        return true
+      end
+    end
+    false
+  end
+
 end
 
 sm = SteamClient.new
