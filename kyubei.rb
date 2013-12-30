@@ -120,7 +120,12 @@ class SteamClient
   # http://steamcommunity.com/market/listings/xxx/yyyy-item-name
   def market_listings_for(item_url)
     render_url = item_url.sub(/\/$/,'') + '/render/?query=&start=0&count=10'
+    begin
     listings = JSON.parse(@c.get_content(render_url))
+    rescue
+      puts "Error getting listing info"
+      return []
+    end
     listings["listinginfo"].map(&:last).map do |listing|
       {
         id: listing["listingid"],
@@ -142,7 +147,11 @@ class SteamClient
       fee: listing[:fee_amount],
       total: listing[:price]
     }
-    res = @c.post("https://steamcommunity.com/market/buylisting/" + id, body, {Referer: listing[:page_url], Origin: "http://steamcommunity.com"})
+    res = @c.post("https://steamcommunity.com/market/buylisting/" + id, body, {Referer: listing[:page_url], Origin: "http://steamcommunity.com"}) rescue nil
+    if res.nil?
+      puts "Timed out buying"
+      return false
+    end
     if res.code == 200
       jsres = JSON.parse(res.body)
       if jsres["wallet_info"]["success"] == 1
@@ -162,6 +171,7 @@ class SteamClient
     listings = listings.sort{|i,j| i[:price] - j[:price]}
     # Pick random cheapest to reduce contention
     cheapest = listings.reject{|i| i[:price] > listings.first[:price]}.sample
+    return false if cheapeast.nil? || cheapest.length == 0
     if cheapest[:price] < price
       market_buy cheapest
     else
