@@ -178,6 +178,25 @@ class SteamClient
       false
     end
   end
+
+  # url MUST be in a form very close to:
+  # http://steamcommunity.com/id/USERID/gamecards/BADGEID
+  def craft_badge(badge_page_url)
+    appid = badge_page_url.split('/').last
+    uid = badge_page_url.split('/')[4]
+    # TODO, figure out what the series and border_color parameters mean.
+    # for now set them to the observed values of 1,0
+    sessionid = URI.decode(@c.cookie_manager.cookies.select{|i| i.match?(URI("https://steamcommunity.com")) && i.name == "sessionid"}.first.value)
+    body = {
+      appid: appid,
+      series: 1,
+      border_color: 0,
+      sessionid: sessionid
+    }
+    res = @c.post("http://steamcommunity.com/id/#{uid}/ajaxcraftbadge/", body, {Referer: badge_page_url, Origin: "http://steamcommunity.com"}) rescue nil
+    res && res.code == 200
+  end
+
 end
 
 sm = SteamClient.new
