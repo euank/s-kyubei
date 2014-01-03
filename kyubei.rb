@@ -121,19 +121,24 @@ class SteamClient
   def market_listings_for(item_url)
     render_url = item_url.sub(/\/$/,'') + '/render/?query=&start=0&count=10'
     begin
-    listings = JSON.parse(@c.get_content(render_url))
+      listings = JSON.parse(@c.get_content(render_url))
     rescue
       puts "Error getting listing info"
       return []
     end
-    listings["listinginfo"].map(&:last).map do |listing|
-      {
-        id: listing["listingid"],
-        price: listing["converted_price"] + listing["converted_fee"],
-        base_amount: listing["converted_price"],
-        fee_amount: listing["converted_fee"],
-        page_url: item_url
-      }
+    begin
+      return listings["listinginfo"].map(&:last).map do |listing|
+        {
+          id: listing["listingid"],
+          price: listing["converted_price"] + listing["converted_fee"],
+          base_amount: listing["converted_price"],
+          fee_amount: listing["converted_fee"],
+          page_url: item_url
+        }
+      end
+    rescue
+      puts "Converted price not there. try again"
+      return []
     end
   end
 
@@ -171,7 +176,7 @@ class SteamClient
     listings = listings.sort{|i,j| i[:price] - j[:price]}
     # Pick random cheapest to reduce contention
     cheapest = listings.reject{|i| i[:price] > listings.first[:price]}.sample
-    return false if cheapeast.nil? || cheapest.length == 0
+    return false if cheapest.nil? || cheapest.length == 0
     if cheapest[:price] < price
       market_buy cheapest
     else
@@ -200,9 +205,18 @@ class SteamClient
 end
 
 sm = SteamClient.new
-conf = JSON.parse(open("./config.json").read)
-username = conf["username"]
-password = conf["password"]
+unless sm.logged_in?
+  puts "Username"
+  username = STDIN.gets.chomp
+  puts "Password"
+  password = STDIN.gets.chomp
+end
+
+if sm.login(username, password)
+  sm.fetch_wallet_balance
+  puts "Logged in"
+  puts "Your wallet has: $#{sm.wallet_balance/100.0}"
+end
 if sm.login(username, password)
   sm.fetch_wallet_balance
   puts "Logged in"
