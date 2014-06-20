@@ -217,11 +217,6 @@ if sm.login(username, password)
   puts "Logged in"
   puts "Your wallet has: $#{sm.wallet_balance/100.0}"
 end
-if sm.login(username, password)
-  sm.fetch_wallet_balance
-  puts "Logged in"
-  puts "Your wallet has: $#{sm.wallet_balance/100.0}"
-else
-  puts "Failure"
-end
+
+
 puts "Done"
